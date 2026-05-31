@@ -1,0 +1,330 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "id": "f8d5e072-663e-441c-8acc-200d40d8e499",
+   "metadata": {},
+   "source": [
+    "**Imports**"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 1,
+   "id": "8fd423a9-fb46-43c6-8428-6ffc8b45d8db",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import os\n",
+    "import pandas as pd\n",
+    "import random\n",
+    "import re\n",
+    "import json\n",
+    "import nltk\n",
+    "from nltk.tokenize import word_tokenize\n",
+    "from nltk.corpus import stopwords\n",
+    "from nltk.stem import WordNetLemmatizer"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "93f01326-611e-4eff-a6a2-b4aed94ce5b4",
+   "metadata": {},
+   "source": [
+    "**File handling**"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 8,
+   "id": "4e71fbf1-8f85-4c05-9e14-5d540785c9e8",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def load_file(filename):\n",
+    "    with open(filename, 'r') as f:\n",
+    "        data = json.load(f)\n",
+    "    \n",
+    "    tags_df = pd.DataFrame(data['Tags'])\n",
+    "    \n",
+    "    return tags_df\n",
+    "\n",
+    "def setup_storage(filename='memory.json'):\n",
+    "    # load dictionary from file called memory.json\n",
+    "    memory = {}\n",
+    "\n",
+    "    if os.path.exists(filename):\n",
+    "        with open(filename, 'r') as f:\n",
+    "            memory = json.load(f)\n",
+    "\n",
+    "    # create chat data file for writing if it doesn't exist\n",
+    "    with open('chatdata.txt', 'a+') as f:\n",
+    "        pass \n",
+    "\n",
+    "    return memory\n",
+    "\n",
+    "def save_storage(memory, filename='memory.json'):\n",
+    "    # save dictionary to file called memory.json\n",
+    "    with open(filename, 'w') as f:\n",
+    "        json.dump(memory, f)    \n",
+    "\n",
+    "def save_conversation(user_sentence, bot_response, filename='chatdata.txt'):\n",
+    "    # save conversation to file called chatdata.json\n",
+    "    with open(filename, 'a') as f:\n",
+    "        # add timestamp\n",
+    "        f.write(f'Timestamp: {pd.Timestamp.now()}\\n')\n",
+    "        f.write(f'User: {user_sentence}\\n')\n",
+    "        f.write(f'Bot: {bot_response}\\n')\n",
+    "        f.write('\\n')"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "47a59925-83a1-4554-991f-eca0a61a0ad2",
+   "metadata": {},
+   "source": [
+    "**Matching patterns using DataFrames**"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 9,
+   "id": "c4ded3e6-afde-4643-8c4e-f36bf4f793dc",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def expand_response_template(response, captured_groups, memory=None):\n",
+    "    # Find all placeholders in the response string in form {placeholder}\n",
+    "    placeholders = re.findall(r'\\{(\\w+)\\}', response)\n",
+    "    \n",
+    "    # Create combined dictionary with current captures and memory\n",
+    "    all_vars = captured_groups.copy()\n",
+    "    \n",
+    "    # Add memory variables (last_name, last_stressor, etc.)\n",
+    "    if memory:\n",
+    "        for key, value in memory.items():\n",
+    "            all_vars[f'last_{key}'] = value\n",
+    "    \n",
+    "    # Replace placeholders with captured values\n",
+    "    for placeholder in placeholders:\n",
+    "        if placeholder in all_vars:\n",
+    "            response = response.replace(f'{{{placeholder}}}', all_vars[placeholder])\n",
+    "    \n",
+    "    return response\n",
+    "\n",
+    "\n",
+    "\n",
+    "def pre_process(sentence):\n",
+    "    # Tokenize the sentence\n",
+    "    words = word_tokenize(sentence)\n",
+    "\n",
+    "    # Define custom stopword set\n",
+    "    custom_keep = {'who', 'she', 'he', 'they', 'what'}\n",
+    "    stop_words = set(stopwords.words(\"english\"))\n",
+    "    custom_stopwords = stop_words - custom_keep  # remove certain words from stopwords\n",
+    "\n",
+    "    # Add punctuation to stopwords for filtering\n",
+    "    custom_stopwords.update({\".\", \",\", \"?\", \"!\"})\n",
+    "\n",
+    "    # Remove stopwords and punctuation\n",
+    "    filtered_words = [word for word in words if word.lower() not in custom_stopwords]\n",
+    "\n",
+    "    # Join filtered words into a sentence\n",
+    "    filtered_sentence = \" \".join(filtered_words)\n",
+    "\n",
+    "    # Lemmatize the filtered sentence\n",
+    "    lemmatizer = WordNetLemmatizer()\n",
+    "    words = word_tokenize(filtered_sentence)\n",
+    "    lemmatized_words = [lemmatizer.lemmatize(word, \"v\") for word in words if word.lower()]\n",
+    "\n",
+    "    # Return cleaned, lemmatized string\n",
+    "    return \" \".join(lemmatized_words)\n",
+    "\n",
+    "def pattern_matching(userinput, tags_df, memory=None):\n",
+    "    lamentized_input = pre_process(userinput)\n",
+    "\n",
+    "    # Goes through each row in the dataframe, then tries to check for the pattern\n",
+    "    for index, row in tags_df.iterrows():\n",
+    "        pattern = row['patterns']\n",
+    "        match = re.search(pattern, lamentized_input, re.IGNORECASE)\n",
+    "\n",
+    "        # if no match, try matching with original user input\n",
+    "        if not match:\n",
+    "            match = re.search(pattern, userinput, re.IGNORECASE)\n",
+    "        \n",
+    "        # If there is a match, choose a random response\n",
+    "        if match:\n",
+    "            response = random.choice(row['responses'])\n",
+    "            \n",
+    "            # Capture all named groups from the regex match\n",
+    "            captured_groups = {}\n",
+    "            for group_name, group_value in match.groupdict().items():\n",
+    "                if group_value is not None:\n",
+    "                    captured_groups[group_name] = group_value.strip()\n",
+    "            \n",
+    "            # Expand response template with captured groups\n",
+    "            response = expand_response_template(response, captured_groups, memory)\n",
+    "            \n",
+    "            return response, captured_groups    \n",
+    "    \n",
+    "    default_responses = [\n",
+    "        \"That's very interesting.\",\n",
+    "        \"Tell me more.\",\n",
+    "        \"I see. Go on.\",\n",
+    "        \"That's quite significant.\",\n",
+    "        \"I understand. Continue.\",\n",
+    "        \"That's worth exploring further.\"\n",
+    "    ]\n",
+    "    return random.choice(default_responses), {}"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "838108c9-9d85-4df8-8853-7c3a645cd52a",
+   "metadata": {},
+   "source": [
+    "**Main chatbot loop**"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 17,
+   "id": "59afb990-841f-48a9-a0bb-82f5b005a4ec",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def chatbot_main():\n",
+    "    tags_df = load_file('intents.json')\n",
+    "    memory = setup_storage()\n",
+    "    \n",
+    "    print(\"Serenity: Hello! I'm Serenity, here to listen. How are you feeling today?\")\n",
+    "    print(\"Serenity: (Just say bye or quit when you are done :) )\")\n",
+    "    \n",
+    "    while True:\n",
+    "        userinput = input(\"You: \").strip()\n",
+    "        \n",
+    "        if userinput.lower() == \"quit\" or userinput.lower() == \"bye\":\n",
+    "            print(f\"Serenity: Goodbye! Take care.\")\n",
+    "            save_storage(memory)\n",
+    "            break\n",
+    "        \n",
+    "        if not userinput:\n",
+    "            continue\n",
+    "\n",
+    "        response, captured_vars = pattern_matching(userinput, tags_df, memory)\n",
+    "\n",
+    "        # save conversation\n",
+    "        save_conversation(userinput, response)\n",
+    "        \n",
+    "        # Update memory with captured variables\n",
+    "        memory.update(captured_vars)\n",
+    "        \n",
+    "        print(\"Serenity:\", response)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "928d87ff-0bd9-49c2-962a-35a6c22529f0",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Serenity: Hello! I'm Serenity, here to listen. How are you feeling today?\n",
+      "Serenity: (Just say bye or quit when you are done :) )\n"
+     ]
+    },
+    {
+     "name": "stdin",
+     "output_type": "stream",
+     "text": [
+      "You:  Hi\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Serenity: Hello there. How can I help you today?\n"
+     ]
+    },
+    {
+     "name": "stdin",
+     "output_type": "stream",
+     "text": [
+      "You:  I feel sad\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Serenity: How long have you felt sad?\n"
+     ]
+    },
+    {
+     "name": "stdin",
+     "output_type": "stream",
+     "text": [
+      "You:  Since my dog died\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Serenity: Is that the real reason?\n"
+     ]
+    },
+    {
+     "name": "stdin",
+     "output_type": "stream",
+     "text": [
+      "You:  Yes\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Serenity: I see. Please continue.\n"
+     ]
+    }
+   ],
+   "source": [
+    "chatbot_main()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "468b3dd7-b6d8-411d-9b14-d4d2e045428a",
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3 (ipykernel)",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.13.5"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}
