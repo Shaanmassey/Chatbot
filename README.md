@@ -1,2 +1,2 @@
 # Chatbot
-Chatbot project for uni. 
+Python chatbot project using intent recognition, regex patterns, JSON data and conversational memory. 
